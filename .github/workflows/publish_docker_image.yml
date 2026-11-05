@@ -1,73 +1,51 @@
+
 name: Build and Publish Docker Image
 
 on:
-  pull_request:
-    types:
-      - closed
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
-concurrency:
-  # Only one production image may be published at a time.
-  group: publish-docker-main
-  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
 
 env:
-  REGISTRY: argoevolutiongoacr.azurecr.io
-  IMAGE_NAME: argo-evolution-go
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ammahomefoods02/argo-evolution-go
 
 jobs:
-  build_deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
-    name: Build and Deploy
+  build:
+    name: Build and Publish
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Read version
         id: version
         run: echo "version=$(cat VERSION 2>/dev/null || echo '0.0.0')" >> $GITHUB_OUTPUT
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.version }}
-            type=raw,value=latest,enable=${{ !contains(steps.version.outputs.version, '-beta') }}
-            type=raw,value=sha-${{ github.sha }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Azure Container Registry
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        id: docker_build
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          # Cache availability must not block publishing a valid image.
-          cache-to: type=gha,mode=min,ignore-error=true
+          tags: |
+            ghcr.io/ammahomefoods02/argo-evolution-go:${{ steps.version.outputs.version }}
+            ghcr.io/ammahomefoods02/argo-evolution-go:latest
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
-
-      - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
-
-      # Azure App Service watches argo-evolution-go:latest through the ACR
-      # continuous-deployment webhook. Publishing this tag triggers the App
-      # Service to pull the new image and replace the running container.
